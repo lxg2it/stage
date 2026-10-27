@@ -318,18 +318,6 @@ document.querySelector("#open-dir")?.addEventListener("click", () => dirInput.cl
 
 /* -------------------------------------------------------------------------- */
 
-/* The report panel scrolls, and on a platform with overlay scrollbars there is no
- * visible cue that it does. Fade the last line until the reader reaches the end. */
-function syncReportFold(): void {
-  const more = report.scrollHeight - report.clientHeight - report.scrollTop > 8;
-  report.classList.toggle("overflowing", more);
-}
-report.addEventListener("scroll", syncReportFold, { passive: true });
-new ResizeObserver(syncReportFold).observe(report);
-const observer = new MutationObserver(syncReportFold);
-observer.observe(report, { childList: true, subtree: true });
-syncReportFold();
-
 window.addEventListener("resize", () => viewer?.requestRender());
 
 // Only if the viewer came up. Without WebGL the report already carries the reason,

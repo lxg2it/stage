@@ -254,29 +254,16 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 1.15rem 1.15rem 1.4rem;
-  /* Sticky, so the panel is only ever as tall as the window it is pinned in.
-   * A fixed 74vh wasted the lower third of a laptop screen and forced a scroll
-   * inside the panel for a report that would otherwise have fitted. */
-  max-height: calc(100vh - 2rem);
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
-  position: sticky;
-  top: 1rem;
+  /* The report is as tall as what it has to say. Capping it turned a long report
+   * into a second scroll region inside the page's, and a panel scrolled halfway
+   * is indistinguishable from a finished one: the fold hid the very section
+   * ("what it could not show") the whole page exists to show. One scroll region,
+   * and the viewport column stays pinned while you read. */
 }
 
-/* Overlay scrollbars are invisible until you scroll, so a clipped panel reads as a
- * finished one. While there is more below, fade the last lines; at the end, stop. */
-.report.overflowing {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2rem), transparent);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2rem), transparent);
+@media (min-width: 1081px) {
+  .viewport { position: sticky; top: 1rem; }
 }
-
-@media (max-width: 1080px) {
-  .report { max-height: none; position: static; }
-}
-
-.report::-webkit-scrollbar { width: 8px; }
-.report::-webkit-scrollbar-thumb { background: #262632; border-radius: 4px; }
 
 .report-head { margin-bottom: 0.9rem; }
 
