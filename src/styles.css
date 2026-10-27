@@ -299,6 +299,18 @@ h2 {
 
 .verdict-claim { font-size: 0.86rem; color: var(--fg); line-height: 1.45; }
 
+/* The verdict was reached from evidence the loader never reported, so it names
+ * the evidence. A downgrade with no visible reason reads as a bug in the page. */
+.verdict-reason {
+  margin-top: 0.55rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid currentColor;
+  font-size: 0.8rem;
+  color: var(--fg);
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
 .verdict-faithful { border-color: #2c4a3c; background: #0f1a15; }
 .verdict-faithful .verdict-label { color: #6fbf8f; }
 .verdict-approximate { border-color: #4a4029; background: #1a170f; }
@@ -321,6 +333,17 @@ h2 {
 }
 
 .report-empty { font-size: 0.82rem; color: var(--fg-dim); }
+
+.report-finding {
+  margin-top: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid #4a4029;
+  background: #1a170f;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--fg);
+}
 
 .stats { display: flex; flex-direction: column; gap: 0.5rem; }
 
@@ -386,6 +409,11 @@ h2 {
 .warnings { list-style: none; display: flex; flex-direction: column; gap: 0.7rem; }
 
 .warning { border-left: 2px solid var(--line); padding-left: 0.6rem; }
+
+/* Found in the scene graph, not reported by the loader: marked so the reader
+ * can tell which entries came from an instrument and which came from a look. */
+.warning-surface { border-left-color: var(--warn); }
+.warning-surface .warning-code { color: var(--warn); }
 
 .warning-code {
   font-family: var(--font-mono);

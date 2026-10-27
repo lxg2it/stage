@@ -5,7 +5,8 @@
  */
 import type { LoadInfo, LoadWarning, MaterialKind, TextureMode } from "@huggingface/usd-web-viewer";
 import { bytes, count, ms, plural, scaleLabel, stageNotes } from "./format.js";
-import { classify, VERDICT, WARNING_MEANING } from "./fidelity.js";
+import { assess, VERDICT, WARNING_MEANING } from "./fidelity.js";
+import type { SurfaceAudit } from "./surface.js";
 
 export interface ReportInput {
   readonly title: string;
@@ -13,8 +14,19 @@ export interface ReportInput {
   readonly info: LoadInfo;
   /** Settles after the render; absent while textures are still streaming. */
   readonly textures?: { loaded: number; failed: number } | undefined;
+  /**
+   * Counting has not finished. Distinct from `textures` on purpose: a partial
+   * count rendered as a final one is a number that will be believed.
+   */
+  readonly texturesPending?: { loaded: number; total: number } | undefined;
   /** What was asked of the loader, so the report can say what the mode excludes. */
   readonly textureMode?: TextureMode | undefined;
+  /**
+   * What the scene graph turned out to contain after the loader finished. The
+   * only evidence on this page that comes from the drawn object rather than
+   * from the account of loading it.
+   */
+  readonly surface?: SurfaceAudit | undefined;
 }
 
 const MATERIAL_LABEL: Readonly<Record<MaterialKind, string>> = {
@@ -111,6 +123,56 @@ function materials(info: LoadInfo): HTMLElement {
   return wrap;
 }
 
+/**
+ * The surfaces, as found in the returned scene rather than as described by the
+ * file. A material is a description of a surface; this section says whether one
+ * was ever built that carries it.
+ */
+function surfaces(audit: SurfaceAudit): HTMLElement {
+  const total = count(audit.materials);
+  const rows = [
+    stat(
+      "surfaces",
+      count(audit.surfaces),
+      "Meshes carrying a material, found by walking the returned scene.",
+    ),
+    stat("materials", total, "Distinct instances. Two surfaces may share one."),
+    stat(
+      "base colour map",
+      `${count(audit.withBaseColorMap)} of ${total}`,
+      audit.withBaseColorMap === audit.materials
+        ? "Every material carries its colour texture."
+        : "A material without one is drawn in its flat colour.",
+    ),
+    stat("normal map", `${count(audit.withNormalMap)} of ${total}`, TEXTURE_MODE_NOTE_SHORT),
+    stat("roughness / metallic", `${count(audit.withOrmMap)} of ${total}`),
+  ];
+  if (audit.flat > 0) {
+    rows.push(
+      stat(
+        "flat materials",
+        count(audit.flat),
+        "No map of any kind. This is the authored factor, which is correct for a painted surface and wrong for a photographic one.",
+      ),
+    );
+  }
+
+  const wrap = section("Surfaces", ...rows);
+  if (audit.texturesOffSurface) {
+    wrap.append(
+      el(
+        "p",
+        "report-finding",
+        "Textures were fetched and none of them reached a surface. The model you are looking at is wearing its flat colour, not its texture.",
+      ),
+    );
+  }
+  return wrap;
+}
+
+const TEXTURE_MODE_NOTE_SHORT =
+  "Preview mode never asks for these, so zero here is the mode working as described.";
+
 /** What each texture mode deliberately leaves out. The count alone cannot say this. */
 const TEXTURE_MODE_NOTE: Readonly<Record<TextureMode, string | undefined>> = {
   none: "Textures were switched off for this load.",
@@ -118,7 +180,12 @@ const TEXTURE_MODE_NOTE: Readonly<Record<TextureMode, string | undefined>> = {
   full: undefined,
 };
 
-function timing(info: LoadInfo, textures: ReportInput["textures"], mode?: TextureMode): HTMLElement {
+function timing(
+  info: LoadInfo,
+  textures: ReportInput["textures"],
+  mode?: TextureMode,
+  pending?: ReportInput["texturesPending"],
+): HTMLElement {
   const { stats } = info;
   const rows = [
     stat("fetch", ms(stats.fetchMs), "Layers pulled over the network."),
@@ -140,20 +207,42 @@ function timing(info: LoadInfo, textures: ReportInput["textures"], mode?: Textur
           .join(" "),
       ),
     );
+  } else if (pending && mode !== "none") {
+    rows.push(
+      stat(
+        "textures",
+        `${count(pending.loaded)} of ${count(pending.total)}, still streaming`,
+        "The stage drew without them. This count was read while the loader was still counting, so it is not final.",
+      ),
+    );
   }
   return section("Load", ...rows);
 }
 
-function warnings(list: readonly LoadWarning[]): HTMLElement {
+function warnings(list: readonly LoadWarning[], audit?: SurfaceAudit): HTMLElement {
+  const offSurface = audit?.texturesOffSurface === true;
+  const total = list.length + (offSurface ? 1 : 0);
   const wrap = el("section", "report-section");
-  wrap.append(el("h3", "report-heading", `What it could not show (${count(list.length)})`));
+  wrap.append(el("h3", "report-heading", `What it could not show (${count(total)})`));
 
-  if (list.length === 0) {
+  if (total === 0) {
     wrap.append(el("p", "report-empty", "Nothing was dropped, substituted or refused."));
     return wrap;
   }
 
   const ul = el("ul", "warnings");
+  if (offSurface) {
+    const li = el("li", "warning warning-surface");
+    li.append(el("span", "warning-code", "textures-off-surface"));
+    li.append(
+      el(
+        "p",
+        "warning-meaning",
+        "The file's textures were fetched, counted, and then bound to no material. This is not a warning the loader raises: it was found by inspecting the scene it returned.",
+      ),
+    );
+    ul.append(li);
+  }
   for (const warning of list) {
     const li = el("li", "warning");
     li.append(el("span", "warning-code", warning.code));
@@ -166,11 +255,15 @@ function warnings(list: readonly LoadWarning[]): HTMLElement {
   return wrap;
 }
 
-function verdict(info: LoadInfo): HTMLElement {
-  const kind = classify(info.warnings);
+function verdict(info: LoadInfo, audit?: SurfaceAudit): HTMLElement {
+  const { kind, reason } = assess({
+    warnings: info.warnings,
+    texturesOffSurface: audit?.texturesOffSurface === true,
+  });
   const { label, claim } = VERDICT[kind];
   const header = el("header", `verdict verdict-${kind}`);
   header.append(el("p", "verdict-label", label), el("p", "verdict-claim", claim));
+  if (reason) header.append(el("p", "verdict-reason", reason));
   return header;
 }
 
@@ -181,7 +274,7 @@ export function renderReport(input: ReportInput): DocumentFragment {
   head.append(el("p", "report-origin", input.origin));
   head.append(el("h2", "report-title", input.title));
 
-  frag.append(head, verdict(input.info));
+  frag.append(head, verdict(input.info, input.surface));
 
   const axis = el("section", "report-section");
   axis.append(el("h3", "report-heading", "Stage"));
@@ -195,8 +288,9 @@ export function renderReport(input: ReportInput): DocumentFragment {
   frag.append(axis);
 
   frag.append(composition(input.info), scene(input.info), materials(input.info));
-  frag.append(timing(input.info, input.textures, input.textureMode));
-  frag.append(warnings(input.info.warnings));
+  if (input.surface) frag.append(surfaces(input.surface));
+  frag.append(timing(input.info, input.textures, input.textureMode, input.texturesPending));
+  frag.append(warnings(input.info.warnings, input.surface));
 
   return frag;
 }

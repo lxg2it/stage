@@ -37,10 +37,39 @@ const APPROXIMATE: ReadonlySet<WarningCode> = new Set<WarningCode>([
   "texture-failed",
 ]);
 
-export function classify(warnings: readonly LoadWarning[]): Fidelity {
-  if (warnings.some((w) => INCOMPLETE.has(w.code))) return "incomplete";
-  if (warnings.some((w) => APPROXIMATE.has(w.code))) return "approximate";
-  return "faithful";
+export interface FidelityEvidence {
+  /** What the loader said about the stage. */
+  readonly warnings: readonly LoadWarning[];
+  /**
+   * The loader fetched textures and not one of them reached a surface, read
+   * from the scene graph rather than from the load report.
+   *
+   * This is here because the loader's warnings describe the FILE, and a file
+   * whose textures arrived but bound to nothing produces no warning at all. The
+   * page would then be entitled to say "faithful" about a model wearing a flat
+   * colour — a claim about the picture that only the picture can settle.
+   */
+  readonly texturesOffSurface?: boolean;
+}
+
+export interface Assessment {
+  readonly kind: Fidelity;
+  /** Why, when the warnings alone do not explain it. */
+  readonly reason?: string;
+}
+
+export function assess(evidence: FidelityEvidence): Assessment {
+  const { warnings } = evidence;
+  if (warnings.some((w) => INCOMPLETE.has(w.code))) return { kind: "incomplete" };
+  if (warnings.some((w) => APPROXIMATE.has(w.code))) return { kind: "approximate" };
+  if (evidence.texturesOffSurface) {
+    return {
+      kind: "approximate",
+      reason:
+        "The loader fetched textures and none of them reached a surface. What you see is the material's flat colour.",
+    };
+  }
+  return { kind: "faithful" };
 }
 
 export const VERDICT: Readonly<Record<Fidelity, { label: string; claim: string }>> = {

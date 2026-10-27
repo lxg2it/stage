@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { dirname, join } from "node:path";
 import type { LoadWarning, WarningCode } from "@huggingface/usd-web-viewer";
-import { classify, VERDICT, WARNING_MEANING } from "./fidelity.js";
+import { assess, VERDICT, WARNING_MEANING } from "./fidelity.js";
+
+function kindOf(warnings: readonly LoadWarning[]): string {
+  return assess({ warnings }).kind;
+}
 
 function warn(code: WarningCode): LoadWarning {
   return { code, message: `${code} happened` };
@@ -26,32 +30,54 @@ const ALL_CODES: readonly WarningCode[] = [
 
 describe("classify", () => {
   it("calls a clean load faithful", () => {
-    expect(classify([])).toBe("faithful");
+    expect(kindOf([])).toBe("faithful");
   });
 
   it("never calls a warning-free load anything else", () => {
     // The control: if the sets were swapped or mis-keyed, this still passes but
     // the two tests below must fail.
-    expect(classify([])).not.toBe("incomplete");
-    expect(classify([])).not.toBe("approximate");
+    expect(kindOf([])).not.toBe("incomplete");
+    expect(kindOf([])).not.toBe("approximate");
   });
 
   it("treats a missing layer as incomplete, not approximate", () => {
     // A missing layer is absent geometry. Calling it approximate would tell the
     // reader the picture is complete when part of the file is not on screen.
-    expect(classify([warn("layer-missing")])).toBe("incomplete");
+    expect(kindOf([warn("layer-missing")])).toBe("incomplete");
   });
 
   it("treats a material fallback as approximate, not incomplete", () => {
-    expect(classify([warn("material-fallback")])).toBe("approximate");
+    expect(kindOf([warn("material-fallback")])).toBe("approximate");
   });
 
   it("lets the worst warning win", () => {
-    expect(classify([warn("material-fallback"), warn("layer-missing")])).toBe("incomplete");
+    expect(kindOf([warn("material-fallback"), warn("layer-missing")])).toBe("incomplete");
   });
 
   it("ignores order", () => {
-    expect(classify([warn("layer-missing"), warn("material-fallback")])).toBe("incomplete");
+    expect(kindOf([warn("layer-missing"), warn("material-fallback")])).toBe("incomplete");
+  });
+});
+
+describe("the scene, not just the report", () => {
+  it("downgrades a warning-free load when the textures never reached a surface", () => {
+    const verdict = assess({ warnings: [], texturesOffSurface: true });
+    expect(verdict.kind).toBe("approximate");
+    expect(verdict.reason).toBeTruthy();
+  });
+
+  // The control, and the reason this arm needs one: a predicate that always
+  // downgrades would satisfy the test above while making every stage suspect.
+  it("leaves a warning-free load faithful when the surfaces carry their maps", () => {
+    const verdict = assess({ warnings: [], texturesOffSurface: false });
+    expect(verdict.kind).toBe("faithful");
+    expect(verdict.reason).toBeUndefined();
+  });
+
+  it("does not let a surface problem promote or soften a missing layer", () => {
+    expect(assess({ warnings: [warn("layer-missing")], texturesOffSurface: true }).kind).toBe(
+      "incomplete",
+    );
   });
 });
 
@@ -60,7 +86,7 @@ describe("coverage", () => {
     // A code that lands in neither set silently reports "faithful" — the one
     // answer that must never be given by default.
     const unclassified = ALL_CODES.filter(
-      (code) => classify([warn(code)]) === "faithful",
+      (code) => kindOf([warn(code)]) === "faithful",
     );
     expect(unclassified).toEqual([]);
   });

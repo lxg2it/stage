@@ -2,6 +2,7 @@ import { createViewer, UsdLoadError } from "@huggingface/usd-web-viewer";
 import type { LoadInfo, LoadOptions, LoadProgress, TextureMode, Viewer } from "@huggingface/usd-web-viewer";
 import { bytes, count } from "./format.js";
 import { renderPlaceholder, renderReport } from "./report.js";
+import { auditSurface } from "./surface.js";
 import { SHELF } from "./shelf.js";
 import type { Asset } from "./shelf.js";
 
@@ -122,6 +123,8 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
  * late write would put the wrong asset's numbers under a newer asset's title.
  */
 let loadTicket = 0;
+/** The last texture-progress event, so a stalled pass can say how far it got. */
+let lastTextureProgress: { loaded: number; total: number } | undefined;
 
 /** Loads a stage, keeping the report and the progress line in step with it. */
 async function show(
@@ -135,13 +138,17 @@ async function show(
     return;
   }
   const ticket = ++loadTicket;
+  lastTextureProgress = undefined;
   setProgress("starting the worker", 0);
   setReport(renderPlaceholder(title, "Composing…"));
 
   const options: LoadOptions = {
     textures: textureMode(),
     maxTextureSize: 1024,
-    onProgress: (p) => setProgress(describe(p), p.fraction),
+    onProgress: (p) => {
+      if (p.stage === "textures") lastTextureProgress = { loaded: p.loaded, total: p.total };
+      setProgress(describe(p), p.fraction);
+    },
   };
   if (files) options.files = files;
 
@@ -150,7 +157,11 @@ async function show(
     if (ticket !== loadTicket) return;
     const info: LoadInfo = result.info;
     const mode = options.textures;
-    setReport(renderReport({ title, origin, info, textureMode: mode }));
+    // Geometry is on screen; textures are still arriving, so the audit may be
+    // read now but its texture count is withheld until the loader says how many
+    // it actually fetched.
+    const surface = () => auditSurface(result.root, undefined);
+    setReport(renderReport({ title, origin, info, textureMode: mode, surface: surface() }));
 
     // The geometry is on screen before the textures are. Saying so is the point:
     // a grey object and an untextured one are indistinguishable without a label.
@@ -158,16 +169,51 @@ async function show(
     if (streaming) setProgress("streaming textures", 0.9);
     else clearProgress();
 
+    // A progress readout is a claim that work is still happening. If the loader
+    // stops reporting, the claim has to stop too: without this, a stage whose
+    // texture pass never settles sits at whatever fraction it last reported,
+    // looking busy forever.
+    const settle = window.setTimeout(() => {
+      const pending = lastTextureProgress;
+      if (ticket !== loadTicket) return;
+      const note = pending
+        ? `${count(pending.loaded)} of ${count(pending.total)} when the loader went quiet.`
+        : "The loader stopped reporting before the count arrived.";
+      setProgress(`textures have not finished: ${note}`, 0.9);
+      window.setTimeout(() => {
+        if (ticket === loadTicket) clearProgress();
+      }, 6000);
+      setReport(
+        renderReport({
+          title,
+          origin,
+          info,
+          textureMode: mode,
+          texturesPending: pending,
+          surface: surface(),
+        }),
+      );
+    }, 45000);
+
     result.complete
       .then(({ textures, failed }) => {
         if (ticket !== loadTicket) return;
+        window.clearTimeout(settle);
         clearProgress();
         setReport(
-          renderReport({ title, origin, info, textureMode: mode, textures: { loaded: textures, failed } }),
+          renderReport({
+            title,
+            origin,
+            info,
+            textureMode: mode,
+            textures: { loaded: textures, failed },
+            surface: auditSurface(result.root, textures),
+          }),
         );
       })
       .catch(() => {
         if (ticket !== loadTicket) return;
+        window.clearTimeout(settle);
         clearProgress();
         setReport(renderReport({ title, origin, info, textureMode: mode }));
       });
@@ -189,6 +235,7 @@ function assetCard(asset: Asset): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "asset";
+  button.dataset.id = asset.id;
   button.title = asset.note;
 
   const img = document.createElement("img");
@@ -208,14 +255,42 @@ function assetCard(asset: Asset): HTMLElement {
 
   button.append(img, name, kind);
   button.addEventListener("click", () => {
-    for (const other of shelfHost.querySelectorAll(".asset")) other.classList.remove("active");
-    button.classList.add("active");
-    void show(asset.name, `nvidia simready · ${asset.kind}`, asset.url);
+    void selectAsset(asset);
   });
   return button;
 }
 
+/**
+ * The URL names the asset on stage, so a report can be linked to rather than
+ * described. `share` is off when the URL already said it: re-selecting what the
+ * link asked for should not push a second identical history entry.
+ */
+async function selectAsset(asset: (typeof SHELF)[number], share = true): Promise<void> {
+  for (const other of shelfHost.querySelectorAll(".asset")) other.classList.remove("active");
+  for (const card of shelfHost.querySelectorAll<HTMLElement>(".asset")) {
+    if (card.dataset.id === asset.id) card.classList.add("active");
+  }
+  if (share) {
+    const url = new URL(location.href);
+    url.searchParams.set("asset", asset.id);
+    history.replaceState(null, "", url);
+  }
+  await show(asset.name, `nvidia simready · ${asset.kind}`, asset.url);
+}
+
+// Local files are stage state the URL cannot describe, so stop claiming otherwise.
+function forgetSharedAsset(): void {
+  const url = new URL(location.href);
+  if (!url.searchParams.has("asset")) return;
+  url.searchParams.delete("asset");
+  history.replaceState(null, "", url);
+}
+
 for (const asset of SHELF) shelfHost.append(assetCard(asset));
+
+const requested = new URL(location.href).searchParams.get("asset");
+const linked = SHELF.find((asset) => asset.id === requested);
+if (linked) void selectAsset(linked, false);
 
 /* ---- files from the machine -------------------------------------------------
  * Nothing leaves the page: the file (or folder) is handed to the loader as a Map
@@ -283,6 +358,7 @@ function fromFileList(list: FileList, rooted: boolean): Map<string, File> {
 }
 
 async function openFiles(files: Map<string, File>): Promise<void> {
+  forgetSharedAsset();
   const root = findRoot([...files.keys()]);
   if (!root) {
     setReport(renderPlaceholder("Not a USD file", "Stage reads .usd, .usda, .usdc and .usdz."));
