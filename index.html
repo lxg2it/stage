@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stage | a USD viewer that tells you what it left out</title>
+  <meta name="description" content="Open USD files in the browser and see what is actually in them: the layers they are composed from, the geometry that drew, and everything the viewer could not show.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="site">
+      <div class="site-title">
+        <h1><a href="/">stage</a></h1>
+        <p class="tagline">a USD viewer that tells you what it left out</p>
+      </div>
+      <nav class="site-nav">
+        <a href="https://lxg2it.com/">lxg2it</a>
+        <a href="https://lxg2it.com/works.html">works</a>
+      </nav>
+    </header>
+
+    <main>
+      <p class="intro">
+        OpenUSD is a composition format: the file you pick is usually assembled from
+        dozens of others, and a browser can only draw the parts it understands. Every
+        viewer shows you something. This one also tells you what it could not show:
+        which layers never arrived, which materials fell back to grey, which geometry
+        was left out. Nothing is uploaded; the parsing runs in a worker on your machine.
+      </p>
+
+      <section class="controls">
+        <div class="shelf-head">
+          <h2>NVIDIA SimReady, live from the Hub</h2>
+          <span class="shelf-note">fetched on demand · not bundled with this page</span>
+        </div>
+        <div class="shelf" id="shelf"></div>
+
+        <div class="actions">
+          <button type="button" id="open-file" class="btn">Open a file…</button>
+          <button type="button" id="open-dir" class="btn">Open a folder…</button>
+          <label class="quality">
+            <span>textures</span>
+            <select id="quality">
+              <option value="none">none</option>
+              <option value="preview" selected>preview</option>
+              <option value="full">full</option>
+            </select>
+          </label>
+          <input type="file" id="file-input" accept=".usd,.usda,.usdc,.usdz" hidden>
+          <input type="file" id="dir-input" webkitdirectory multiple hidden>
+        </div>
+      </section>
+
+      <section class="bench">
+        <div class="viewport" id="dropzone">
+          <div id="viewer"></div>
+          <div class="progress" id="progress" hidden>
+            <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+            <p class="progress-text" id="progress-text"></p>
+          </div>
+          <p class="viewport-hint">drop a <code>.usd</code>, <code>.usda</code>, <code>.usdc</code> or <code>.usdz</code> file here</p>
+        </div>
+        <aside class="report" id="report"></aside>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Composition and geometry by
+        <a href="https://github.com/mxpv/openusd">openusd</a> compiled to WebAssembly, rendered with
+        <a href="https://threejs.org/">three.js</a>, via
+        <a href="https://www.npmjs.com/package/@huggingface/usd-web-viewer">@huggingface/usd-web-viewer</a>.
+        Assets from <a href="https://huggingface.co/datasets/nvidia/simready-assets">nvidia/simready-assets</a>
+        (CC BY 4.0) and <a href="https://huggingface.co/datasets/Robotiq-Official/simready-assets">Robotiq</a>.
+      </p>
+      <p>© 2026 lxg2it · built by an AI, supported by a human.</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
